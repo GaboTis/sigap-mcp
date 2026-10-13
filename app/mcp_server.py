@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mcp.server.mcpserver import MCPServer
 
+from app.services import consultas as svc_consultas
 from app.services import contribuyentes as svc_contribuyentes
 from app.services import expedientes as svc_expedientes
 from app.services import panel as svc_panel
@@ -26,7 +27,8 @@ mcp = MCPServer(
     instructions=(
         "Servidor de datos municipales de Rawson (SIGAP, solo lectura). "
         "Herramientas: consulta de expedientes, deuda del padrón, recaudación, "
-        "ejecución presupuestaria y KPIs ejecutivos. "
+        "ejecución presupuestaria, KPIs ejecutivos y consultas SQL generadas por "
+        "el agente (solo SELECT, limitadas y auditadas). "
         "Los expedientes se identifican como NUMERO-LETRA/AÑO (ej. 3540-S-2026)."
     ),
 )
@@ -88,6 +90,28 @@ def ejecucion_presupuestaria(ejercicio: int = None, top: int = 10) -> dict:
                       "órdenes de compra y pago, proveedores y stock.")
 def kpis_ejecutivos() -> dict:
     return svc_panel.kpis_ejecutivos()
+
+
+@mcp.tool(description="Lista las tablas de la base SIGAP con su cantidad aproximada de filas "
+                      "(las más grandes primero). Usar antes de generar una consulta SQL "
+                      "cuando no se conoce el nombre de la tabla. Parámetro opcional: filtro "
+                      "parcial del nombre (ej. 'cobro', 'boleta', 'contribu').")
+def listar_tablas(filtro: str = '') -> dict:
+    return svc_consultas.listar_tablas(filtro)
+
+
+@mcp.tool(description="Devuelve las columnas de una tabla de SIGAP (nombre, tipo y largo) "
+                      "para poder armar una consulta SQL correcta.")
+def columnas_tabla(tabla: str) -> dict:
+    return svc_consultas.columnas_tabla(tabla)
+
+
+@mcp.tool(description="Ejecuta una consulta SQL de SOLO LECTURA generada por el agente "
+                      "contra la base SIGAP. Solo SELECT/WITH, máximo 200 filas, timeout "
+                      "de 20 segundos y sin bloqueos (LOCK_TIMEOUT 10s). Devuelve columnas "
+                      "y filas. Si falla, devuelve el error para corregir la consulta.")
+def consulta_sql(sql: str) -> dict:
+    return svc_consultas.ejecutar_sql(sql)
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ Seguridad: cada ruta exige token con el scope correspondiente (ver app/auth.py).
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import requiere_scope
-from app.services import contribuyentes, expedientes, panel, recaudacion
+from app.services import consultas, contribuyentes, expedientes, panel, recaudacion
 
 router = APIRouter()
 
@@ -76,3 +76,29 @@ def api_ejecucion(ejercicio: int = None, top: int = Query(10, ge=1, le=50)):
 @router.get('/api/panel/kpis', dependencies=[Depends(requiere_scope('kpis'))])
 def api_kpis_ejecutivos():
     return panel.kpis_ejecutivos()
+
+
+# ── Consultas SQL del agente (solo lectura, con guardas) ──────
+
+@router.get('/api/consulta/esquema', dependencies=[Depends(requiere_scope('sql.consultas'))])
+def api_listar_tablas(filtro: str = Query('', max_length=100)):
+    """Catálogo de tablas de SIGAP con cantidad de filas (para que el agente arme SQL)."""
+    return consultas.listar_tablas(filtro)
+
+
+@router.get('/api/consulta/columnas', dependencies=[Depends(requiere_scope('sql.consultas'))])
+def api_columnas_tabla(tabla: str = Query(..., max_length=100)):
+    """Columnas de una tabla de SIGAP."""
+    return consultas.columnas_tabla(tabla)
+
+
+@router.post('/api/consulta/sql', dependencies=[Depends(requiere_scope('sql.consultas'))])
+def api_ejecutar_sql(body: dict):
+    """Ejecuta una consulta SELECT generada por el agente (validada y limitada)."""
+    sql = str(body.get('sql') or '').strip()
+    if not sql:
+        raise HTTPException(status_code=400, detail='El campo "sql" es requerido.')
+    resultado = consultas.ejecutar_sql(sql)
+    if not resultado.get('ok'):
+        raise HTTPException(status_code=422, detail=resultado.get('error', 'Error en la consulta'))
+    return resultado
