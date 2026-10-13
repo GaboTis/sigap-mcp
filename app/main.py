@@ -11,10 +11,11 @@ Endpoints:
 El MCP local (stdio) corre aparte: python app/mcp_server.py
 """
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import Request
 
 from app.mcp_server import mcp
@@ -37,12 +38,20 @@ app = FastAPI(
 app.include_router(router)
 
 
+@app.get('/dashboard')
+def dashboard():
+    """Panel Ejecutivo standalone — cliente web de esta API."""
+    ruta = Path(__file__).parent / 'static' / 'dashboard.html'
+    return FileResponse(ruta)
+
+
 @app.get('/')
 def raiz():
     return {
         'servicio': 'sigap-mcp',
         'version': '1.0.0',
         'acceso': 'solo lectura',
+        'dashboard': '/dashboard (panel ejecutivo web)',
         'rest': '/api/*  (header Authorization: Bearer <API_TOKEN>)',
         'mcp_http': '/mcp (Bearer token)',
         'mcp_local': 'python app/mcp_server.py (stdio, sin token)',

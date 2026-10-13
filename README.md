@@ -50,6 +50,21 @@ copy .env.example .env   # completar credenciales y API_TOKEN
 | `ejecucion_presupuestaria(ejercicio, top)` | Presupuesto vs ejecutado por partida |
 | `kpis_ejecutivos()` | KPIs consolidados: recaudación, deuda, gestión, compras, stock |
 
+## 📊 Dashboard ejecutivo (incluido)
+
+El servicio trae su propio panel ejecutivo web en **`http://127.0.0.1:8100/dashboard`**:
+- 14 KPI cards (recaudación hoy/mes/año + interanual, índice de cobranza, deuda del
+  padrón con desglose, expedientes en trámite, tiempos de resolución, planes,
+  contribuyentes, OC, OP, proveedores y stock)
+- 6 gráficos ECharts (recaudación mensual 3 años, deuda por tipo, antigüedad en
+  trámite, resolución por tipo, carga por sector, ejecución presupuestaria)
+- 2 tablas (partidas y expedientes más demorados)
+- Al abrirlo pide el **API_TOKEN** una vez (opcional: recordar en el navegador)
+- Refresco automático cada 5 minutos · Imprimir/PDF con estilos de impresión
+
+Es un cliente más de la API (HTML puro, `app/static/dashboard.html`): demuestra la
+arquitectura de un solo backend de datos consumido por web, dashboards y agentes IA.
+
 ## 🖥️ Conectar Claude Desktop (local)
 
 En `claude_desktop_config.json`:
