@@ -33,6 +33,23 @@ def api_analitica_expedientes():
     return expedientes.analitica_expedientes()
 
 
+@router.get('/api/contribuyentes/por-dni', dependencies=[Depends(requiere_scope('contribuyentes.identidad'))])
+def api_por_dni(dni: int):
+    """Búsqueda por DNI — SOLO para verificación de identidad (agente)."""
+    return contribuyentes.buscar_por_dni(dni)
+
+
+@router.post('/api/contribuyentes/verificar', dependencies=[Depends(requiere_scope('contribuyentes.identidad'))])
+def api_verificar_identidad(body: dict):
+    """Verificación determinística: compara la respuesta del usuario con el padrón."""
+    dni = int(body.get('dni') or 0)
+    nomenclatura = str(body.get('nomenclatura') or '').strip()
+    respuesta = str(body.get('respuesta') or '').strip()
+    if dni <= 0 or not nomenclatura or not respuesta:
+        raise HTTPException(status_code=400, detail='dni, nomenclatura y respuesta son requeridos')
+    return contribuyentes.verificar_identidad(dni, nomenclatura, respuesta)
+
+
 @router.get('/api/contribuyentes/deuda', dependencies=[Depends(requiere_scope('contribuyentes.deuda'))])
 def api_deuda_contribuyente(codigo: str):
     d = contribuyentes.deuda_contribuyente(codigo)
