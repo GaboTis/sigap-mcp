@@ -1,12 +1,13 @@
 """Validación del dashboard ejecutivo sobre sigap-mcp."""
 import asyncio
-import os
+import json
+from pathlib import Path
 
-from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
-load_dotenv()
-TOKEN = os.getenv('API_TOKEN', '')
+_RAIZ = Path(__file__).resolve().parent.parent
+_TOKENS = json.loads((_RAIZ / 'tokens.json').read_text(encoding='utf-8'))
+TOKEN = _TOKENS['clientes']['dashboard']['token']
 
 
 async def main():

@@ -7,10 +7,11 @@ import sys
 import httpx
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
-TOKEN = os.getenv('API_TOKEN', '')
+_RAIZ = Path(__file__).resolve().parent.parent
+_TOKENS = json.loads((_RAIZ / 'tokens.json').read_text(encoding='utf-8'))
+TOKEN = _TOKENS['clientes']['webapp']['token']
 BASE = 'http://127.0.0.1:8100'
 
 
@@ -37,17 +38,24 @@ def test_rest():
     r = httpx.get(f'{BASE}/api/contribuyentes/deuda', params={'codigo': 'IM345805620000'}, headers=h, timeout=60)
     print(f"  deuda contribuyente: {r.status_code} | {r.json()['nombre']} → ${r.json()['deuda']['total']:,.2f}")
 
+    # 3b) Scope insuficiente → 403 (token dashboard no puede ver deuda puntual)
+    h_dash = {'Authorization': f'Bearer {_TOKENS["clientes"]["dashboard"]["token"]}'}
+    r403 = httpx.get(f'{BASE}/api/contribuyentes/deuda', params={'codigo': 'IM345805620000'},
+                     headers=h_dash, timeout=60)
+    print(f"  scope insuficiente (dashboard → deuda): {r403.status_code} (esperado 403)")
+
     # 4) MCP HTTP sin token → 401
     r = httpx.post(f'{BASE}/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
                                         'params': {'protocolVersion': '2025-06-18',
                                                    'capabilities': {}, 'clientInfo': {'name': 'qa', 'version': '1'}}},
                    timeout=30)
     print(f"  MCP HTTP sin token: {r.status_code} (esperado 401)")
+    h_mcp = {'Authorization': f'Bearer {_TOKENS["clientes"]["agentes"]["token"]}'}
     r2 = httpx.post(f'{BASE}/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
                                          'params': {'protocolVersion': '2025-06-18',
                                                     'capabilities': {}, 'clientInfo': {'name': 'qa', 'version': '1'}}},
-                    headers=h, timeout=30, follow_redirects=True)
-    print(f"  MCP HTTP con token: {r2.status_code} (esperado 200)")
+                    headers=h_mcp, timeout=30, follow_redirects=True)
+    print(f"  MCP HTTP con token scope mcp: {r2.status_code} (esperado 200)")
 
 
 async def test_mcp_stdio():

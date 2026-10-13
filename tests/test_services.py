@@ -1,6 +1,5 @@
 """Tests de servicios y API con conexión SQL mockeada."""
 import datetime
-import os
 from unittest.mock import patch
 
 import pytest
@@ -157,7 +156,7 @@ def test_kpis_ejecutivos():
     assert r['deuda_padron']['total'] == 126.0
 
 
-# ── API (auth) ────────────────────────────────────────────────
+# ── API (auth + scopes) ───────────────────────────────────────
 
 def test_health_sin_token():
     client = TestClient(app)
@@ -173,10 +172,46 @@ def test_api_exige_token():
 
 
 def test_api_con_token_valido():
-    client = TestClient(app)
-    token = os.getenv('API_TOKEN', 'test')
-    headers = {'Authorization': f'Bearer {token}'}
-    with patch('app.services.expedientes.get_conn', return_value=FakeConn(BUSCAR_ROWS)):
+    from app import auth
+    token = 'test-token-webapp'
+    with patch.object(auth, 'CLIENTES', {
+            token: {'nombre': 'webapp', 'scopes': ['expedientes.read']},
+            'test-token-dash': {'nombre': 'dashboard', 'scopes': ['kpis']}}):
+        client = TestClient(app)
+        headers = {'Authorization': f'Bearer {token}'}
+        with patch('app.services.expedientes.get_conn', return_value=FakeConn(BUSCAR_ROWS)):
+            r = client.get('/api/expedientes/buscar', params={'q': '3540'}, headers=headers)
+        assert r.status_code == 200
+        assert r.json()['total'] == 1
+
+
+def test_api_scope_insuficiente():
+    from app import auth
+    token_dash = 'test-token-dash'
+    with patch.object(auth, 'CLIENTES', {
+            'test-token-webapp': {'nombre': 'webapp', 'scopes': ['expedientes.read']},
+            token_dash: {'nombre': 'dashboard', 'scopes': ['kpis']}}):
+        client = TestClient(app)
+        headers = {'Authorization': f'Bearer {token_dash}'}
         r = client.get('/api/expedientes/buscar', params={'q': '3540'}, headers=headers)
-    assert r.status_code == 200
-    assert r.json()['total'] == 1
+        assert r.status_code == 403
+
+
+def test_mcp_http_exige_scope_mcp():
+    from app import auth
+    token = 'test-token-agentes'
+    with patch.object(auth, 'CLIENTES', {
+            token: {'nombre': 'agentes', 'scopes': ['mcp']},
+            'test-token-webapp': {'nombre': 'webapp', 'scopes': ['expedientes.read']}}):
+        client = TestClient(app)
+        # sin token → 401
+        r1 = client.post('/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                                       'params': {'protocolVersion': '2025-06-18', 'capabilities': {},
+                                                  'clientInfo': {'name': 't', 'version': '1'}}})
+        assert r1.status_code == 401
+        # token sin scope mcp → 401 también
+        r2 = client.post('/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'initialize',
+                                       'params': {'protocolVersion': '2025-06-18', 'capabilities': {},
+                                                  'clientInfo': {'name': 't', 'version': '1'}}},
+                         headers={'Authorization': 'Bearer test-token-webapp'})
+        assert r2.status_code == 401

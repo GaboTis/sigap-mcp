@@ -1,0 +1,20 @@
+{
+  "clientes": {
+    "dashboard": {
+      "token": "DASHBOARD_TOKEN_AQUI",
+      "descripcion": "Panel ejecutivo web",
+      "scopes": ["kpis", "recaudacion", "expedientes.analitica"]
+    },
+    "webapp": {
+      "token": "WEBAPP_TOKEN_AQUI",
+      "descripcion": "App web SIGAP KPI (futura migración)",
+      "scopes": ["expedientes.read", "expedientes.analitica", "contribuyentes.deuda",
+                 "contribuyentes.buscar", "recaudacion", "kpis"]
+    },
+    "whatsapp": {
+      "token": "WHATSAPP_TOKEN_AQUI",
+      "descripcion": "Agente WhatsApp — solo consultas puntuales de vecinos",
+      "scopes": ["expedientes.read", "contribuyentes.deuda"]
+    }
+  }
+}

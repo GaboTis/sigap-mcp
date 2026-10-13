@@ -3,11 +3,11 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 
-from dotenv import load_dotenv
-
-load_dotenv()
-TOKEN = os.getenv('API_TOKEN', '')
+_RAIZ = Path(__file__).resolve().parent.parent
+_TOKENS = json.loads((_RAIZ / 'tokens.json').read_text(encoding='utf-8'))
+TOKEN = _TOKENS['clientes']['agentes']['token']
 
 
 async def main():

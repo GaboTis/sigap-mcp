@@ -1,5 +1,6 @@
 # Secretos
 .env
+tokens.json
 
 # Python
 __pycache__/
