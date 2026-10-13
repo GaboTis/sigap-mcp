@@ -2,7 +2,7 @@ module.exports = {
   apps: [{
     name: 'sigap-mcp',
     script: 'C:\\Users\\User\\Documents\\CODE\\sigap-mcp\\venv\\Scripts\\uvicorn.exe',
-    args: 'app.main:app --host 127.0.0.1 --port 8100',
+    args: 'app.main:app --host 0.0.0.0 --port 8100',
     cwd: 'C:\\Users\\User\\Documents\\CODE\\sigap-mcp',
     interpreter: 'none',
     instances: 1,

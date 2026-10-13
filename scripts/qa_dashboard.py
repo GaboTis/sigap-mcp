@@ -17,7 +17,7 @@ async def main():
         page.on('pageerror', lambda e: errs.append(str(e)))
         page.on('console', lambda m: errs.append(m.text) if m.type == 'error' else None)
 
-        await page.goto('http://127.0.0.1:8100/dashboard', wait_until='networkidle', timeout=60000)
+        await page.goto('http://192.168.225.119:8100/dashboard', wait_until='networkidle', timeout=60000)
         await page.wait_for_timeout(1500)
 
         # 1) Panel de auth visible
