@@ -161,7 +161,7 @@
     <header>
         <div>
             <h1><i class="bi bi-speedometer2 me-2"></i>Panel Ejecutivo Municipal</h1>
-            <div class="sub">Municipalidad de Rawson — datos reales de SIGAP vía sigap-mcp</div>
+            <div class="sub">Municipalidad de Rawson — datos reales de SIGAPP vía SIGAPP-mcp</div>
         </div>
         <div class="controls">
             <span id="lastUpdated"></span>
@@ -175,7 +175,7 @@
     <div id="authPanel" hidden>
         <div class="lock"><i class="bi bi-shield-lock"></i></div>
         <h2>Token de acceso</h2>
-        <p>Este panel consulta la capa de datos <b>sigap-mcp</b>.<br>Ingresá el API_TOKEN (está en el archivo <code>.env</code> del servidor).</p>
+        <p>Este panel consulta la capa de datos <b>SIGAPP-mcp</b>.<br>Ingresá el API_TOKEN (está en el archivo <code>.env</code> del servidor).</p>
         <input type="password" id="tokenInput" placeholder="API_TOKEN" autocomplete="off">
         <div class="row2">
             <label><input type="checkbox" id="recordarToken"> Recordar en este navegador</label>
@@ -248,12 +248,12 @@
         </div>
 
         <footer>
-            <b>Fuentes:</b> SIGAP SQL Server (solo lectura) — cobros/boletas/planpago/contribu · padrón DWH de deuda ·
+            <b>Fuentes:</b> SIGAPP SQL Server (solo lectura) — cobros/boletas/planpago/contribu · padrón DWH de deuda ·
             expediente/expemovi/sectmuni · ordencpa/reciteso/proveedor/stock.<br>
             Los tiempos "en trámite" incluyen expedientes históricos que el sistema nunca cerró; el tiempo real de
             atención es el de "Resolución por tipo" (finalizados).<br>
-            Stock bajo = existencias entre 1 y 5 unidades (umbral operativo; SIGAP no define mínimo por artículo).<br>
-            Datos servidos por <b>sigap-mcp</b> (REST API con token) — actualización automática cada 5 minutos.
+            Stock bajo = existencias entre 1 y 5 unidades (umbral operativo; SIGAPP no define mínimo por artículo).<br>
+            Datos servidos por <b>SIGAPP-mcp</b> (REST API con token) — actualización automática cada 5 minutos.
         </footer>
     </div>
 </div>
@@ -262,7 +262,7 @@
 // ── Estado y auth ─────────────────────────────────────────────
 const API = ''; // mismo origen
 const charts = {};
-let token = sessionStorage.getItem('sigap_token') || localStorage.getItem('sigap_token') || '';
+let token = sessionStorage.getItem('SIGAPP_token') || localStorage.getItem('SIGAPP_token') || '';
 
 function mostrarAuth(errorMsg) {
     document.getElementById('authPanel').hidden = false;
@@ -276,8 +276,8 @@ function guardarToken() {
     const t = document.getElementById('tokenInput').value.trim();
     if (!t) { document.getElementById('authError').textContent = 'Ingresá el token.'; return; }
     token = t;
-    if (document.getElementById('recordarToken').checked) localStorage.setItem('sigap_token', t);
-    else sessionStorage.setItem('sigap_token', t);
+    if (document.getElementById('recordarToken').checked) localStorage.setItem('SIGAPP_token', t);
+    else sessionStorage.setItem('SIGAPP_token', t);
     document.getElementById('authPanel').hidden = true;
     cargarTodo();
 }
