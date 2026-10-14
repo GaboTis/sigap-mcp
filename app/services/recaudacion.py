@@ -140,3 +140,143 @@ def ejecucion_presupuestaria(ejercicio=None, top=10):
                   'pct_ejecucion': round(total_ej / total_pres * 100, 1) if total_pres else 0},
         'partidas': filas[:top],
     }
+
+
+# ── Canales, colectores, anulaciones y medios (analítica de cobros) ──
+
+_CANAL_FIJO = {100: 'Mercado Pago', 104: 'Foto Multas', 53: 'Pago Fácil', 67: 'Rapipago',
+               51: 'Banco', 97: 'Tesorería'}
+
+
+def canales_recaudacion(anio=None):
+    """Recaudación del año por canal: cajas, colectores, MP, agentes, banco..."""
+    anio = int(anio or datetime.now().year)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT CODIGO, TIPO FROM colector WITH (NOLOCK)")
+    mapa = {int(r[0] or 0): str(r[1] or '').strip().upper() for r in cur.fetchall()}
+
+    cur.execute(f"""SELECT COBRADOR, COUNT(*), SUM(TOTALGRAL) FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=0 AND YEAR(FECHA)={anio} AND COBRADOR<>96
+        GROUP BY COBRADOR""")
+    canales = {}
+    for cobrador, n, monto in cur.fetchall():
+        codigo = int(cobrador or 0)
+        if codigo in _CANAL_FIJO:
+            canal = {'Pago Fácil': 'Agentes (Pago Fácil/Rapipago)',
+                     'Rapipago': 'Agentes (Pago Fácil/Rapipago)'}.get(_CANAL_FIJO[codigo], _CANAL_FIJO[codigo])
+        elif mapa.get(codigo) == 'CJ':
+            canal = 'Cajas'
+        elif mapa.get(codigo) == 'CO':
+            canal = 'Colectores'
+        else:
+            canal = 'Otros'
+        c = canales.setdefault(canal, {'canal': canal, 'cobros': 0, 'monto': 0.0})
+        c['cobros'] += int(n or 0)
+        c['monto'] += float(monto or 0)
+    conn.close()
+    lista = sorted(canales.values(), key=lambda x: -x['monto'])
+    return {'anio': anio, 'total': round(sum(c['monto'] for c in lista), 2), 'canales': lista}
+
+
+def anulaciones(anio=None, limit=20, mes=None):
+    """Cobros anulados del año: total por mes y últimos registros con motivo.
+
+    Parámetro opcional mes (1-12): filtra los últimos registros a ese mes.
+    """
+    anio = int(anio or datetime.now().year)
+    limit = max(1, min(int(limit or 20), 50))
+    mes = int(mes) if mes else None
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(f"""SELECT MONTH(FECHA), COUNT(*), SUM(TOTALGRAL) FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=1 AND YEAR(FECHA)={anio} GROUP BY MONTH(FECHA)""")
+    meses = [{'mes': int(r[0]), 'cobros': int(r[1] or 0), 'monto': float(r[2] or 0)}
+             for r in cur.fetchall()]
+    filtro_mes = f' AND MONTH(FECHAANULA)={mes}' if mes else ''
+    cur.execute(f"""SELECT NROCOBRO, FECHA, FECHAANULA, TOTALGRAL, OBSERANULA, NOMENCLA
+        FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=1 AND YEAR(FECHA)={anio}{filtro_mes}
+        ORDER BY FECHAANULA DESC OFFSET 0 ROWS FETCH NEXT {limit} ROWS ONLY""")
+    items = [{'nrocobro': int(r[0] or 0), 'fecha': str(r[1] or '')[:10],
+              'fecha_anula': str(r[2] or '')[:10], 'monto': float(r[3] or 0),
+              'observacion': str(r[4] or '').strip(), 'nomencla': str(r[5] or '').strip()}
+             for r in cur.fetchall()]
+    conn.close()
+    return {'anio': anio, 'mes': mes,
+            'total_cobros': sum(m['cobros'] for m in meses),
+            'total_monto': round(sum(m['monto'] for m in meses), 2),
+            'meses': meses, 'ultimos': items}
+
+
+def colectores(anio=None):
+    """Ranking de colectores: recaudación del año y deuda del padrón asignada."""
+    anio = int(anio or datetime.now().year)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT CODIGO, NOMBRE, ACTIVO FROM colector WITH (NOLOCK)")
+    cat = {int(r[0] or 0): {'nombre': str(r[1] or '').strip(), 'activo': bool(r[2])}
+           for r in cur.fetchall()}
+    cur.execute(f"""SELECT COBRADOR, COUNT(*), SUM(TOTALGRAL) FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=0 AND YEAR(FECHA)={anio} GROUP BY COBRADOR""")
+    recaudado = {}
+    for codigo, n, monto in cur.fetchall():
+        codigo = int(codigo or 0)
+        if codigo in cat:
+            recaudado[codigo] = {'cobros': int(n or 0), 'monto': float(monto or 0)}
+    # Deuda del padrón asignada por colector
+    cur.execute("SELECT MAX(table_name) FROM INFORMATION_SCHEMA.TABLES "
+                "WHERE table_name LIKE 'DWH_Deudas_Items_%' AND table_name NOT LIKE '%web%'")
+    dwh = cur.fetchone()[0]
+    cur.execute(f"""
+        WITH dwh AS (
+            SELECT Nomencla, TotalGral,
+                   ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
+            FROM [{dwh}] WITH (NOLOCK))
+        SELECT c2.COLECTOR, COUNT(*), SUM(ISNULL(d.TotalGral, 0))
+        FROM contribu c2 WITH (NOLOCK)
+        LEFT JOIN dwh d ON d.Nomencla = c2.NOMENCLA AND d.rn = 1
+        WHERE c2.COLECTOR <> 0 GROUP BY c2.COLECTOR""")
+    deuda = {int(r[0] or 0): {'contribuyentes': int(r[1] or 0), 'deuda': float(r[2] or 0)}
+             for r in cur.fetchall()}
+    conn.close()
+    ranking = []
+    for codigo, r in sorted(recaudado.items(), key=lambda x: -x[1]['monto']):
+        c = cat.get(codigo, {'nombre': f'Colector {codigo}', 'activo': False})
+        d = deuda.get(codigo, {'contribuyentes': 0, 'deuda': 0})
+        ranking.append({'cobrador': codigo, 'nombre': c['nombre'], 'activo': c['activo'],
+                        'cobros': r['cobros'], 'monto': round(r['monto'], 2),
+                        'contribuyentes': d['contribuyentes'], 'deuda_asignada': round(d['deuda'], 2)})
+    return {'anio': anio, 'ranking': ranking[:30]}
+
+
+def medios_pago(anio=None):
+    """Composición mensual de la recaudación: efectivo, depósito/cheque, digital."""
+    anio = int(anio or datetime.now().year)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(f"""SELECT MONTH(FECHA), SUM(TOTALGRAL) FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=0 AND YEAR(FECHA)={anio} GROUP BY MONTH(FECHA)""")
+    total = {int(r[0]): float(r[1] or 0) for r in cur.fetchall()}
+    cur.execute(f"""SELECT MONTH(x.FECHA), SUM(x.dep)
+        FROM (SELECT c2.NROCOBRO, c2.FECHA,
+                     CASE WHEN SUM(fd.IMPORTE) > MAX(c2.TOTALGRAL)
+                          THEN MAX(c2.TOTALGRAL) ELSE SUM(fd.IMPORTE) END dep
+              FROM cobrfpgdepo fd WITH (NOLOCK)
+              INNER JOIN cobros c2 WITH (NOLOCK) ON fd.NROCOBRO = c2.NROCOBRO
+              WHERE c2.ANULADO = 0 AND YEAR(c2.FECHA) = {anio}
+              GROUP BY c2.NROCOBRO, c2.FECHA) x
+        GROUP BY MONTH(x.FECHA)""")
+    dep = {int(r[0]): float(r[1] or 0) for r in cur.fetchall()}
+    cur.execute(f"""SELECT MONTH(FECHA), SUM(TOTALGRAL) FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=0 AND YEAR(FECHA)={anio} AND COBRADOR IN (100,104) GROUP BY MONTH(FECHA)""")
+    web = {int(r[0]): float(r[1] or 0) for r in cur.fetchall()}
+    conn.close()
+    meses = []
+    for m in range(1, 13):
+        d = dep.get(m, 0)
+        w = web.get(m, 0)
+        meses.append({'mes': m, 'efectivo': round(max(total.get(m, 0) - d - w, 0), 2),
+                      'deposito_cheque': round(d, 2), 'digital': round(w, 2),
+                      'total': round(total.get(m, 0), 2)})
+    return {'anio': anio, 'meses': meses}

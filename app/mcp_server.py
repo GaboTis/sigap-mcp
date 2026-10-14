@@ -84,6 +84,35 @@ def ejecucion_presupuestaria(ejercicio: int = None, top: int = 10) -> dict:
     return svc_recaudacion.ejecucion_presupuestaria(ejercicio, top)
 
 
+@mcp.tool(description="Recaudación del año por canal de cobro: cajas, colectores, "
+                      "Mercado Pago, agentes (Pago Fácil/Rapipago), banco, foto multas "
+                      "y tesorería, con cantidad de cobros y montos. Parámetro opcional: anio.")
+def canales_recaudacion(anio: int = None) -> dict:
+    return svc_recaudacion.canales_recaudacion(anio)
+
+
+@mcp.tool(description="Cobros anulados del año: total de cobros y montos por mes, y los "
+                      "últimos registros anulados con motivo y nomenclatura. "
+                      "Parámetros opcionales: anio, limit (default 20) y mes (1-12) "
+                      "para filtrar los últimos registros a un mes específico.")
+def anulaciones(anio: int = None, limit: int = 20, mes: int = None) -> dict:
+    return svc_recaudacion.anulaciones(anio, limit, mes)
+
+
+@mcp.tool(description="Ranking de colectores del año: recaudación por colector, cantidad "
+                      "de cobros, contribuyentes asignados y deuda del padrón asignada. "
+                      "Parámetro opcional: anio.")
+def colectores(anio: int = None) -> dict:
+    return svc_recaudacion.colectores(anio)
+
+
+@mcp.tool(description="Composición mensual de la recaudación del año: efectivo/caja, "
+                      "depósito/cheque y pagos digitales (Mercado Pago + foto multas). "
+                      "Parámetro opcional: anio.")
+def medios_pago(anio: int = None) -> dict:
+    return svc_recaudacion.medios_pago(anio)
+
+
 @mcp.tool(description="KPIs ejecutivos consolidados para el intendente: recaudación "
                       "(hoy/mes/año + interanual), deuda del padrón por componente y tipo, "
                       "expedientes en trámite, planes de pago, contribuyentes activos, "

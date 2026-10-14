@@ -73,6 +73,30 @@ def api_ejecucion(ejercicio: int = None, top: int = Query(10, ge=1, le=50)):
     return recaudacion.ejecucion_presupuestaria(ejercicio, top)
 
 
+@router.get('/api/recaudacion/canales', dependencies=[Depends(requiere_scope('recaudacion'))])
+def api_canales(anio: int = None):
+    """Recaudación del año por canal (cajas, colectores, MP, agentes, banco)."""
+    return recaudacion.canales_recaudacion(anio)
+
+
+@router.get('/api/recaudacion/anulaciones', dependencies=[Depends(requiere_scope('recaudacion'))])
+def api_anulaciones(anio: int = None, limit: int = Query(20, ge=1, le=50), mes: int = None):
+    """Cobros anulados del año: total por mes y últimos registros con motivo."""
+    return recaudacion.anulaciones(anio, limit, mes)
+
+
+@router.get('/api/recaudacion/colectores', dependencies=[Depends(requiere_scope('recaudacion'))])
+def api_colectores(anio: int = None):
+    """Ranking de colectores con recaudación y deuda del padrón asignada."""
+    return recaudacion.colectores(anio)
+
+
+@router.get('/api/recaudacion/medios', dependencies=[Depends(requiere_scope('recaudacion'))])
+def api_medios(anio: int = None):
+    """Composición mensual de la recaudación: efectivo, depósito/cheque, digital."""
+    return recaudacion.medios_pago(anio)
+
+
 @router.get('/api/panel/kpis', dependencies=[Depends(requiere_scope('kpis'))])
 def api_kpis_ejecutivos():
     return panel.kpis_ejecutivos()
