@@ -97,6 +97,12 @@ def api_medios(anio: int = None):
     return recaudacion.medios_pago(anio)
 
 
+@router.get('/api/recaudacion/cobros-del-dia', dependencies=[Depends(requiere_scope('recaudacion'))])
+def api_cobros_del_dia():
+    """Cobros de HOY discriminados: total, por tipo de boleta, partida y cobrador."""
+    return recaudacion.cobros_del_dia()
+
+
 @router.get('/api/panel/kpis', dependencies=[Depends(requiere_scope('kpis'))])
 def api_kpis_ejecutivos():
     return panel.kpis_ejecutivos()

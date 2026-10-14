@@ -106,6 +106,14 @@ def colectores(anio: int = None) -> dict:
     return svc_recaudacion.colectores(anio)
 
 
+@mcp.tool(description="Cobros de HOY discriminados: total del día (cobros y monto), anulados, "
+                      "pagos digitales, desglose por tipo de boleta (mensuales/varios/planes/"
+                      "especiales), por partida presupuestaria y por cobrador. "
+                      "Usar cuando preguntan cuánto se cobró hoy o de dónde sale ese monto.")
+def cobros_del_dia() -> dict:
+    return svc_recaudacion.cobros_del_dia()
+
+
 @mcp.tool(description="Composición mensual de la recaudación del año: efectivo/caja, "
                       "depósito/cheque y pagos digitales (Mercado Pago + foto multas). "
                       "Parámetro opcional: anio.")

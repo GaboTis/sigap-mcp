@@ -6,6 +6,7 @@ Fuentes validadas:
 - Ejecución por partida = cobrpartid + EXISTS (la versión con LEFT JOIN
   cobritem duplicaba montos y tardaba ~50s).
 """
+import re
 from datetime import datetime
 
 from app.db import get_conn
@@ -143,6 +144,75 @@ def ejecucion_presupuestaria(ejercicio=None, top=10):
 
 
 # ── Canales, colectores, anulaciones y medios (analítica de cobros) ──
+
+_TIPO_BOLETA = {'P': 'Pagos mensuales', 'V': 'Pagos varios', 'G': 'Planes de pago',
+                'E': 'Pagos especiales'}
+
+
+def cobros_del_dia():
+    """Cobros de HOY discriminados: total, por tipo de boleta, por partida y por cobrador."""
+    hoy = datetime.now().strftime('%Y%m%d')
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute(f"""SELECT COUNT(*), ISNULL(SUM(TOTALGRAL),0) FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=0 AND FECHA>=CAST('{hoy}' AS datetime)""")
+    n, total = cur.fetchone()
+    cur.execute(f"""SELECT COUNT(*), ISNULL(SUM(TOTALGRAL),0) FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=1 AND FECHA>=CAST('{hoy}' AS datetime)""")
+    n_anul, tot_anul = cur.fetchone()
+
+    # Por tipo de boleta (cobritem)
+    cur.execute(f"""
+        SELECT ISNULL(ci.TIPO,'?'), COUNT(*), SUM(ISNULL(ci.TOTAL,0))
+        FROM cobritem ci WITH (NOLOCK)
+        INNER JOIN cobros c WITH (NOLOCK) ON ci.NROCOBRO=c.NROCOBRO
+        WHERE c.ANULADO=0 AND c.FECHA>=CAST('{hoy}' AS datetime)
+        GROUP BY ci.TIPO""")
+    por_tipo = [{'tipo': str(r[0] or '?'), 'descripcion': _TIPO_BOLETA.get(str(r[0] or ''), 'Otros'),
+                 'boletas': int(r[1] or 0), 'monto': float(r[2] or 0)}
+                for r in cur.fetchall()]
+
+    # Por partida presupuestaria (cobrpartid)
+    cur.execute(f"""
+        SELECT cp.partida, SUM(CASE WHEN ISNULL(ct.ANULADO,0)=0 THEN ISNULL(cp.total,0) ELSE 0 END)
+        FROM cobrpartid cp WITH (NOLOCK)
+        INNER JOIN cobros ct WITH (NOLOCK) ON cp.nrocobro=ct.NROCOBRO
+        WHERE ct.FECHA>=CAST('{hoy}' AS datetime)
+        GROUP BY cp.partida""")
+    por_partida = []
+    for r in cur.fetchall():
+        if float(r[1] or 0) == 0:
+            continue
+        partida = re.sub(r'\s+\d{4}$', '', str(r[0] or '').strip()).strip()
+        partida = partida.replace('\xa0', ' ').strip()
+        por_partida.append({'partida': partida, 'monto': float(r[1] or 0)})
+    por_partida.sort(key=lambda x: -x['monto'])
+
+    # Por cobrador (top)
+    cur.execute(f"""SELECT TOP 8 COBRADOR, COUNT(*), SUM(TOTALGRAL)
+        FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=0 AND FECHA>=CAST('{hoy}' AS datetime)
+        GROUP BY COBRADOR ORDER BY SUM(TOTALGRAL) DESC""")
+    por_cobrador = [{'cobrador': int(r[0] or 0), 'cobros': int(r[1] or 0),
+                     'monto': float(r[2] or 0)} for r in cur.fetchall()]
+
+    # Digital (MP + foto multas)
+    cur.execute(f"""SELECT COUNT(*), ISNULL(SUM(TOTALGRAL),0) FROM cobros WITH (NOLOCK)
+        WHERE ANULADO=0 AND FECHA>=CAST('{hoy}' AS datetime) AND COBRADOR IN (100,104)""")
+    n_dig, tot_dig = cur.fetchone()
+    conn.close()
+
+    return {
+        'fecha': datetime.now().strftime('%Y-%m-%d'),
+        'total': {'cobros': int(n or 0), 'monto': round(float(total or 0), 2)},
+        'anulados': {'cobros': int(n_anul or 0), 'monto': round(float(tot_anul or 0), 2)},
+        'digital': {'cobros': int(n_dig or 0), 'monto': round(float(tot_dig or 0), 2)},
+        'por_tipo_boleta': por_tipo,
+        'por_partida': por_partida[:12],
+        'por_cobrador': por_cobrador,
+    }
+
 
 _CANAL_FIJO = {100: 'Mercado Pago', 104: 'Foto Multas', 53: 'Pago Fácil', 67: 'Rapipago',
                51: 'Banco', 97: 'Tesorería'}
