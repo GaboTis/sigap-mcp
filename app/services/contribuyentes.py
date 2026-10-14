@@ -62,12 +62,16 @@ def deuda_contribuyente(codigo):
 
 
 def buscar_contribuyentes(q, limit=10):
-    """Busca en el padrón DWH por nomenclatura o nombre."""
+    """Busca en el padrón DWH por nomenclatura o nombre (todas las palabras)."""
+    import re as _re
     q = str(q or '').strip()
     if not q:
         return {'total': 0, 'resultados': []}
     limit = max(1, min(int(limit or 10), 50))
     like = f'%{q}%'
+    # Palabras para coincidencia AND en el nombre (soporta espacios múltiples
+    # en la base: 'PEREIRA  GISELA' matchea con 'pereira gisela').
+    palabras = [p for p in _re.split(r'\s+', q.replace(',', ' ')) if p]
 
     conn = get_conn()
     cur = conn.cursor()
@@ -76,13 +80,16 @@ def buscar_contribuyentes(q, limit=10):
         conn.close()
         return {'total': 0, 'resultados': []}
 
+    cond_nombre = ' AND '.join(['NombreRazonSocial LIKE ?'] * len(palabras)) \
+        if palabras else '1=0'
+    params = [like] + [f'%{p}%' for p in palabras]
     cur.execute(f"""
         SELECT TOP {limit} Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente,
                Nombre_Barrio, TotalGral, COUNT(*) OVER() as total
         FROM [{tabla}] WITH (NOLOCK)
         WHERE FechaActualizacion = (SELECT MAX(FechaActualizacion) FROM [{tabla}] WITH (NOLOCK))
-          AND (Nomencla LIKE ? OR NombreRazonSocial LIKE ?)
-        ORDER BY TotalGral DESC""", (like, like))
+          AND (Nomencla LIKE ? OR ({cond_nombre}))
+        ORDER BY TotalGral DESC""", params)
     raw = cur.fetchall()
     conn.close()
 
