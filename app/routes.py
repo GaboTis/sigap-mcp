@@ -132,3 +132,12 @@ def api_ejecutar_sql(body: dict):
     if not resultado.get('ok'):
         raise HTTPException(status_code=422, detail=resultado.get('error', 'Error en la consulta'))
     return resultado
+
+
+@router.post('/api/consulta/sql-batch', dependencies=[Depends(requiere_scope('sql.consultas'))])
+def api_ejecutar_sql_batch(body: dict):
+    """Ejecuta VARIAS consultas SELECT (máx. 6) en una sola llamada."""
+    resultado = consultas.ejecutar_consultas(body.get('consultas', []))
+    if not resultado.get('ok'):
+        raise HTTPException(status_code=422, detail=resultado.get('error', 'Error en las consultas'))
+    return resultado

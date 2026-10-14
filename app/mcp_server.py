@@ -151,5 +151,15 @@ def consulta_sql(sql: str) -> dict:
     return svc_consultas.ejecutar_sql(sql)
 
 
+@mcp.tool(description="Ejecuta VARIAS consultas SQL de SOLO LECTURA en una sola llamada "
+                      "(hasta 6). Ideal para preguntas compuestas que necesitan varios "
+                      "números (ej. hoy vs mismo día del año pasado, por tipo y por cobrador). "
+                      "Cada consulta: solo SELECT/WITH, máx. 200 filas, con las mismas guardas. "
+                      "Devuelve los resultados etiquetados por índice; si alguna falla, "
+                      "devuelve su error para corregirla.")
+def consulta_multiple(consultas: list) -> dict:
+    return svc_consultas.ejecutar_consultas(consultas)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

@@ -15,6 +15,7 @@ logger = logging.getLogger('sigap.consultas')
 MAX_FILAS = 200          # máximo de filas devueltas al agente
 TIMEOUT_S = 20           # timeout de ejecución (segundos)
 CELDA_MAX = 500          # truncado de celdas de texto largas
+MAX_CONSULTAS_BATCH = 6  # máximo de consultas por llamada batch
 
 # Instrucciones prohibidas aunque estén dentro de un SELECT (defensa en profundidad)
 _PROHIBIDOS = re.compile(
@@ -61,6 +62,30 @@ def _celda(v):
     return s if len(s) <= CELDA_MAX else s[:CELDA_MAX] + f'…({len(s)} chars)'
 
 
+def _sin_order_by_final(sql: str) -> str:
+    """Quita el ORDER BY final (a nivel 0 de paréntesis) de la consulta.
+
+    Al envolver la consulta en un SELECT TOP externo, un ORDER BY interno
+    sin TOP es inválido en SQL Server ('ORDER BY no es válido en vistas…').
+    """
+    nivel = 0
+    ultima_pos = -1
+    i = 0
+    n = len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch == '(':
+            nivel += 1
+        elif ch == ')':
+            nivel -= 1
+        elif nivel == 0 and sql[i:i + 8].upper() == 'ORDER BY':
+            ultima_pos = i
+        i += 1
+    if ultima_pos >= 0:
+        return sql[:ultima_pos].rstrip()
+    return sql
+
+
 def ejecutar_sql(sql: str) -> dict:
     """Ejecuta una consulta SELECT (validada) contra SIGAP, con límites."""
     try:
@@ -68,7 +93,8 @@ def ejecutar_sql(sql: str) -> dict:
     except ValueError as e:
         return {'ok': False, 'error': f'Consulta rechazada: {e}'}
     # TOP externo: garantiza el tope de filas aunque la consulta no tenga TOP.
-    envuelta = f'SELECT TOP ({MAX_FILAS}) * FROM (\n{sql_limpia}\n) AS _consulta'
+    # Sin ORDER BY interno (inválido dentro de la tabla derivada).
+    envuelta = f'SELECT TOP ({MAX_FILAS}) * FROM (\n{_sin_order_by_final(sql_limpia)}\n) AS _consulta'
 
     conn = get_conn()
     try:
@@ -92,6 +118,64 @@ def ejecutar_sql(sql: str) -> dict:
         # El error de SQL se devuelve al agente para que corrija la consulta.
         logger.warning(f'consulta rechazada: {str(e)[:200]}')
         return {'ok': False, 'error': f'{type(e).__name__}: {str(e)[:400]}'}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def ejecutar_consultas(consultas) -> dict:
+    """Ejecuta VARIAS consultas SELECT en una sola llamada (batch).
+
+    Cada consulta se valida con las mismas guardas y se ejecuta en la MISMA
+    conexión (una sola ida a la base). Límite: MAX_CONSULTAS_BATCH consultas,
+    200 filas por consulta, timeout total 60s.
+    """
+    if not isinstance(consultas, (list, tuple)):
+        return {'ok': False, 'error': 'Se esperaba una lista de consultas.'}
+    consultas = [str(c or '') for c in consultas]
+    if not consultas:
+        return {'ok': False, 'error': 'La lista de consultas está vacía.'}
+    if len(consultas) > MAX_CONSULTAS_BATCH:
+        return {'ok': False,
+                'error': f'Máximo {MAX_CONSULTAS_BATCH} consultas por llamada '
+                         f'(recibidas {len(consultas)}). Dividí el análisis en bloques.'}
+
+    # Validar TODAS antes de ejecutar (si una es inválida, se informa cuál)
+    validadas = []
+    for i, sql in enumerate(consultas):
+        try:
+            validadas.append(_validar(sql))
+        except ValueError as e:
+            return {'ok': False, 'error': f'Consulta {i + 1} rechazada: {e}'}
+
+    conn = get_conn()
+    resultados = []
+    try:
+        conn.timeout = 60
+        cur = conn.cursor()
+        cur.execute('SET LOCK_TIMEOUT 10000')
+        for i, sql in enumerate(validadas):
+            envuelta = f'SELECT TOP ({MAX_FILAS}) * FROM (\n{_sin_order_by_final(sql)}\n) AS _consulta'
+            t0 = time.time()
+            try:
+                cur.execute(envuelta)
+                columnas = [d[0] for d in cur.description] if cur.description else []
+                filas = [[_celda(c) for c in r] for r in cur.fetchall()]
+                resultados.append({
+                    'indice': i + 1,
+                    'ok': True,
+                    'columnas': columnas,
+                    'filas': filas,
+                    'cantidad': len(filas),
+                    'truncado': len(filas) >= MAX_FILAS,
+                    'ms': round((time.time() - t0) * 1000),
+                })
+            except Exception as e:
+                resultados.append({'indice': i + 1, 'ok': False,
+                                   'error': f'{type(e).__name__}: {str(e)[:300]}'})
+        return {'ok': True, 'total_consultas': len(validadas), 'resultados': resultados}
     finally:
         try:
             conn.close()
