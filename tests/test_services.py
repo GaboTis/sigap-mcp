@@ -93,7 +93,7 @@ def test_detalle_expediente():
 DWH_ROWS = [
     [('DWH_Deudas_Items_202610',)],                     # descubrimiento de tabla
     [(3540, 'PINTO VICENTA', 'MERCEDITAS 332', 'IM', 'VILLA HIPODROMO',
-      82871.85, 0.0, 17074.96, 0.0, 99946.81, '13/10/2026')],  # deuda (join rn=1)
+      82871.85, 0.0, 17074.96, 0.0, 99946.81, 0.0, '13/10/2026')],  # deuda (join rn=1)
 ]
 
 

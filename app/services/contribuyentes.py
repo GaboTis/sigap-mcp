@@ -17,7 +17,13 @@ def _ultima_tabla_dwh(cur):
 
 
 def deuda_contribuyente(codigo):
-    """Deuda del padrón oficial de un contribuyente (por nomenclatura, ej. IM344002000008)."""
+    """Deuda del padrón oficial de un contribuyente (por nomenclatura, ej. IM344002000008).
+
+    Regla del padrón (auditada el 15/10/2026): TotalBoleta, TotalPlanPago y
+    TotalValores YA incluyen su interés; solo el interés de certificados
+    (InteresCertEjec) va aparte. Tipos sin padrón (CG, DC, JF, PN, MA) se
+    calculan internamente desde boletas/planes/certificados.
+    """
     codigo = str(codigo or '').strip()
     if not codigo:
         return None
@@ -32,17 +38,25 @@ def deuda_contribuyente(codigo):
     cur.execute(f"""
         SELECT Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente, Nombre_Barrio,
                TotalBoleta, TotalPlanPago, TotalCertEjec, TotalValores, TotalGral,
-               FechaActualizacion
+               InteresCertEjec, FechaActualizacion
         FROM (
             SELECT *, ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
             FROM [{tabla}] WITH (NOLOCK)
         ) x
         WHERE rn = 1 AND Nomencla = ?""", (codigo,))
     r = cur.fetchone()
-    conn.close()
-    if not r:
-        return None
 
+    if not r:
+        # Tipos sin padrón (o nomencla ausente): cálculo interno
+        conn.close()
+        return _deuda_interna(codigo)
+
+    total = float(r[9] or 0) + float(r[10] or 0)
+    if total <= 0 and str(r[3] or '').strip().upper() in ('CG', 'DC', 'JF', 'PN', 'MA'):
+        conn.close()
+        return _deuda_interna(codigo)
+
+    conn.close()
     return {
         'nomenclatura': str(r[0]),
         'nombre': str(r[1] or ''),
@@ -52,13 +66,66 @@ def deuda_contribuyente(codigo):
         'deuda': {
             'boletas': float(r[5] or 0),
             'planes_pago': float(r[6] or 0),
-            'certificados': float(r[7] or 0),
+            'certificados': float(r[7] or 0) + float(r[10] or 0),
             'valores': float(r[8] or 0),
-            'total': float(r[9] or 0),
+            'total': round(total, 2),
         },
-        'actualizado': str(r[10] or ''),
+        'actualizado': str(r[11] or ''),
         'fuente': tabla,
     }
+
+
+def _deuda_interna(codigo):
+    """Cálculo interno para tipos sin padrón (CG, DC, JF, PN, MA):
+    cuotas pendientes netas de pagos por boleta + planes + certificados."""
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT TOP 1 c.NOMENCLA, c.RAZONSOCI, c.TIPOCONTRIBUYENTE
+            FROM contribu c WITH (NOLOCK) WHERE c.NOMENCLA = ?""", (codigo,))
+        fila = cur.fetchone()
+        if not fila:
+            return None
+        cur.execute("""
+            SELECT ISNULL(SUM((CASE WHEN IMPORTE0 > 0 THEN IMPORTE0 - ISNULL(DESCTO0,0) ELSE 0 END)
+                            + (CASE WHEN ISNULL(IMPORTE1,0) > 0 THEN IMPORTE1 ELSE 0 END)
+                            + (CASE WHEN ISNULL(IMPORTE2,0) > 0 THEN IMPORTE2 + ISNULL(RECARGO2,0) ELSE 0 END)
+                            + (CASE WHEN ISNULL(IMPORTE3,0) > 0 THEN IMPORTE3 + ISNULL(RECARGO3,0) ELSE 0 END)), 0)
+            FROM boletas WITH (NOLOCK) WHERE NOMENCLA = ? AND ANULA = 0""", (codigo,))
+        brutas = float(cur.fetchone()[0] or 0)
+        cur.execute("""SELECT ISNULL(SUM(ci.total),0) FROM cobritem ci WITH (NOLOCK)
+                       INNER JOIN cobros c WITH (NOLOCK) ON ci.NROCOBRO = c.NROCOBRO
+                       WHERE c.ANULADO = 0 AND c.NOMENCLA = ? AND ci.BOLETA IS NOT NULL""", (codigo,))
+        pagos = float(cur.fetchone()[0] or 0)
+        boletas = max(0.0, brutas - pagos)
+        cur.execute("""SELECT ISNULL(SUM(CASE WHEN TOTALDEUDA - MONTOPAGADO > 0
+                                THEN TOTALDEUDA - MONTOPAGADO ELSE 0 END),0)
+                       FROM planpago WITH (NOLOCK) WHERE NOMENCLA = ? AND ANULA = 0 AND ESTADO IN (0,1,3)""",
+                    (codigo,))
+        planes = float(cur.fetchone()[0] or 0)
+        cur.execute("""SELECT ISNULL(SUM(CAPITAL + INTERESES),0)
+                       FROM certejec WITH (NOLOCK) WHERE NOMENCLA = ? AND ANULA = 0 AND ESTADO IN (1,2,3)""",
+                    (codigo,))
+        certs = float(cur.fetchone()[0] or 0)
+        return {
+            'nomenclatura': str(fila[0]).strip(),
+            'nombre': (fila[1] or '').strip(),
+            'domicilio': '',
+            'tipo': str(fila[2] or '').strip(),
+            'barrio': '',
+            'deuda': {
+                'boletas': round(boletas, 2),
+                'planes_pago': round(planes, 2),
+                'certificados': round(certs, 2),
+                'valores': 0.0,
+                'total': round(boletas + planes + certs, 2),
+            },
+            'actualizado': '',
+            'fuente': 'operativo (tipo sin padrón)',
+        }
+    finally:
+        conn.close()
 
 
 def buscar_contribuyentes(q, limit=10):
@@ -85,11 +152,12 @@ def buscar_contribuyentes(q, limit=10):
     params = [like] + [f'%{p}%' for p in palabras]
     cur.execute(f"""
         SELECT TOP {limit} Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente,
-               Nombre_Barrio, TotalGral, COUNT(*) OVER() as total
+               Nombre_Barrio, TotalGral + ISNULL(InteresCertEjec, 0) as Total,
+               COUNT(*) OVER() as total
         FROM [{tabla}] WITH (NOLOCK)
         WHERE FechaActualizacion = (SELECT MAX(FechaActualizacion) FROM [{tabla}] WITH (NOLOCK))
           AND (Nomencla LIKE ? OR ({cond_nombre}))
-        ORDER BY TotalGral DESC""", params)
+        ORDER BY Total DESC""", params)
     raw = cur.fetchall()
     conn.close()
 
