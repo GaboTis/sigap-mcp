@@ -141,3 +141,13 @@ def api_ejecutar_sql_batch(body: dict):
     if not resultado.get('ok'):
         raise HTTPException(status_code=422, detail=resultado.get('error', 'Error en las consultas'))
     return resultado
+
+
+@router.post('/api/consulta/exportar', dependencies=[Depends(requiere_scope('sql.consultas'))])
+def api_exportar(body: dict):
+    """Ejecuta VARIAS consultas SELECT con tope amplio para EXPORTAR a planillas
+    (hasta 5.000 filas por consulta, mismas guardas de solo lectura)."""
+    resultado = consultas.exportar_consultas(body.get('consultas', []))
+    if not resultado.get('ok'):
+        raise HTTPException(status_code=422, detail=resultado.get('error', 'Error en las consultas'))
+    return resultado

@@ -13,6 +13,7 @@ from app.db import get_conn
 logger = logging.getLogger('sigap.consultas')
 
 MAX_FILAS = 200          # máximo de filas devueltas al agente
+MAX_FILAS_EXPORT = 5000  # máximo de filas para exportar a planillas
 TIMEOUT_S = 20           # timeout de ejecución (segundos)
 CELDA_MAX = 500          # truncado de celdas de texto largas
 MAX_CONSULTAS_BATCH = 6  # máximo de consultas por llamada batch
@@ -125,13 +126,14 @@ def ejecutar_sql(sql: str) -> dict:
             pass
 
 
-def ejecutar_consultas(consultas) -> dict:
+def ejecutar_consultas(consultas, max_filas=None) -> dict:
     """Ejecuta VARIAS consultas SELECT en una sola llamada (batch).
 
     Cada consulta se valida con las mismas guardas y se ejecuta en la MISMA
     conexión (una sola ida a la base). Límite: MAX_CONSULTAS_BATCH consultas,
-    200 filas por consulta, timeout total 60s.
+    `max_filas` filas por consulta (default 200), timeout total 120s.
     """
+    tope = max_filas or MAX_FILAS
     if not isinstance(consultas, (list, tuple)):
         return {'ok': False, 'error': 'Se esperaba una lista de consultas.'}
     consultas = [str(c or '') for c in consultas]
@@ -153,11 +155,11 @@ def ejecutar_consultas(consultas) -> dict:
     conn = get_conn()
     resultados = []
     try:
-        conn.timeout = 60
+        conn.timeout = 120
         cur = conn.cursor()
         cur.execute('SET LOCK_TIMEOUT 10000')
         for i, sql in enumerate(validadas):
-            envuelta = f'SELECT TOP ({MAX_FILAS}) * FROM (\n{_sin_order_by_final(sql)}\n) AS _consulta'
+            envuelta = f'SELECT TOP ({tope}) * FROM (\n{_sin_order_by_final(sql)}\n) AS _consulta'
             t0 = time.time()
             try:
                 cur.execute(envuelta)
@@ -169,7 +171,7 @@ def ejecutar_consultas(consultas) -> dict:
                     'columnas': columnas,
                     'filas': filas,
                     'cantidad': len(filas),
-                    'truncado': len(filas) >= MAX_FILAS,
+                    'truncado': len(filas) >= tope,
                     'ms': round((time.time() - t0) * 1000),
                 })
             except Exception as e:
@@ -181,6 +183,12 @@ def ejecutar_consultas(consultas) -> dict:
             conn.close()
         except Exception:
             pass
+
+
+def exportar_consultas(consultas) -> dict:
+    """Igual que ejecutar_consultas pero con tope de filas para EXPORTAR
+    (planillas): hasta MAX_FILAS_EXPORT filas por consulta."""
+    return ejecutar_consultas(consultas, max_filas=MAX_FILAS_EXPORT)
 
 
 # ── Catálogo (tablas y columnas) para que el LLM genere SQL ────
