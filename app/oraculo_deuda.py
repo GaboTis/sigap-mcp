@@ -152,14 +152,47 @@ def deuda_interna_nomencla(conn, codigo):
 
 
 def deuda_padron_nomencla(conn, codigo, tabla=None):
-    """Deuda del padrón DWH (fila más reciente por nomencla) + interés de
+    """Deuda del padrón (fila más reciente por nomencla) + interés de
     certificados. Devuelve None si no hay fila.
 
-    IMPORTANTE — performance: la tabla DWH tiene millones de filas SIN índice,
-    así que NUNCA usar ROW_NUMBER() sobre toda la tabla (revienta la memoria
-    del SQL Server con RESOURCE_SEMAPHORE). TOP 1 con filtro por nomencla
-    ordenado por fecha mantiene el escaneo en streaming, sin memory grant.
+    Estrategia (el MSSQL de producción NO se toca):
+    1. Primero NUESTRO PostgreSQL (tabla dwh_padron, espejo nocturno vía ETL)
+       — respuesta en milisegundos con índice.
+    2. Fallback: MSSQL con TOP 1 por nomencla (stream, sin memory grant),
+       por si el ETL no corrió todavía.
     """
+    try:
+        import os
+
+        import psycopg2
+        import psycopg2.extras
+        pg = psycopg2.connect(
+            host=os.getenv('PG_HOST', 'postgres'),
+            port=os.getenv('PG_PORT', '5432'),
+            dbname=os.getenv('PG_DATABASE', 'sigap_kpi'),
+            user=os.getenv('PG_USER', 'sigap'),
+            password=os.getenv('PG_PASSWORD', 'sigap_dev_2026'))
+        with pg.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as curpg:
+            curpg.execute('SELECT * FROM dwh_padron WHERE Nomencla = %s', (codigo,))
+            d = curpg.fetchone()
+        pg.close()
+        if d:
+            return {
+                'total': round(float(d.get('totalgral', 0) or 0)
+                               + float(d.get('interescertejec', 0) or 0), 2),
+                'boletas': round(float(d.get('totalboleta', 0) or 0), 2),
+                'planes_pago': round(float(d.get('totalplanpago', 0) or 0), 2),
+                'certificados': round(float(d.get('totalcertejec', 0) or 0)
+                                      + float(d.get('interescertejec', 0) or 0), 2),
+                'valores': round(float(d.get('totalvalores', 0) or 0), 2),
+                'nominal': round(float(d.get('totalnominal', 0) or 0), 2),
+                'interes_certificados': round(float(d.get('interescertejec', 0) or 0), 2),
+                'fuente': 'postgresql (ETL padrón)',
+                'actualizado': str(d.get('fechaactualizacion') or '') if d.get('fechaactualizacion') else None,
+            }
+    except Exception as e:
+        logger.warning(f'deuda: padrón PG no disponible ({e}) — usando MSSQL')
+
     tabla = tabla or obtener_tabla_dwh(conn)
     if not tabla:
         return None
