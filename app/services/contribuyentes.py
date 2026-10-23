@@ -5,6 +5,7 @@ Los snapshots acumulan una fila POR DÍA por nomencla → la deuda real es la fi
 más reciente por nomencla (ROW_NUMBER por FechaActualizacion). Coincide con el
 padrón SIGAP (validado en QA).
 """
+from app import oraculo_deuda
 from app.db import get_conn
 
 
@@ -17,12 +18,12 @@ def _ultima_tabla_dwh(cur):
 
 
 def deuda_contribuyente(codigo):
-    """Deuda del padrón oficial de un contribuyente (por nomenclatura, ej. IM344002000008).
+    """Deuda de un contribuyente (por nomenclatura, ej. IM344002000008).
 
-    Regla del padrón (auditada el 15/10/2026): TotalBoleta, TotalPlanPago y
-    TotalValores YA incluyen su interés; solo el interés de certificados
-    (InteresCertEjec) va aparte. Tipos sin padrón (CG, DC, JF, PN, MA) se
-    calculan internamente desde boletas/planes/certificados.
+    La cuenta sale del ORÁCULO DE DEUDA (app/oraculo_deuda.py), la misma
+    fuente única que usan la app web, el mapa, el panel y el bot:
+    padrón DWH oficial (TotalGral + InteresCertEjec) para IM/CO/CM/PT y
+    cálculo interno para CG/DC/JF/PN/MA.
     """
     codigo = str(codigo or '').strip()
     if not codigo:
@@ -30,48 +31,51 @@ def deuda_contribuyente(codigo):
 
     conn = get_conn()
     cur = conn.cursor()
+
+    # Identidad: padrón DWH si existe, si no contribu
+    identidad = None
     tabla = _ultima_tabla_dwh(cur)
-    if not tabla:
-        conn.close()
-        return None
+    if tabla:
+        cur.execute(f"""
+            SELECT Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente, Nombre_Barrio
+            FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
+                FROM [{tabla}] WITH (NOLOCK)
+            ) x WHERE rn = 1 AND Nomencla = ?""", (codigo,))
+        r = cur.fetchone()
+        if r:
+            identidad = {'nomenclatura': str(r[0]), 'nombre': str(r[1] or ''),
+                         'domicilio': str(r[2] or ''), 'tipo': str(r[3] or ''),
+                         'barrio': str(r[4] or '')}
+    if not identidad:
+        cur.execute("SELECT TOP 1 NOMENCLA, RAZONSOCI, TIPOCONTRIBUYENTE "
+                    "FROM contribu c WITH (NOLOCK) WHERE c.NOMENCLA = ?", (codigo,))
+        fila = cur.fetchone()
+        if not fila:
+            conn.close()
+            return None
+        identidad = {'nomenclatura': str(fila[0]), 'nombre': str(fila[1] or ''),
+                     'domicilio': '', 'tipo': str(fila[2] or ''), 'barrio': ''}
 
-    cur.execute(f"""
-        SELECT Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente, Nombre_Barrio,
-               TotalBoleta, TotalPlanPago, TotalCertEjec, TotalValores, TotalGral,
-               InteresCertEjec, FechaActualizacion
-        FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
-            FROM [{tabla}] WITH (NOLOCK)
-        ) x
-        WHERE rn = 1 AND Nomencla = ?""", (codigo,))
-    r = cur.fetchone()
-
-    if not r:
-        # Tipos sin padrón (o nomencla ausente): cálculo interno
-        conn.close()
-        return _deuda_interna(codigo)
-
-    total = float(r[9] or 0) + float(r[10] or 0)
-    if total <= 0 and str(r[3] or '').strip().upper() in ('CG', 'DC', 'JF', 'PN', 'MA'):
-        conn.close()
-        return _deuda_interna(codigo)
-
+    reg = oraculo_deuda.deuda_de_nomencla(conn, codigo, identidad['tipo'], tabla)
     conn.close()
+    if not reg:
+        return None
     return {
-        'nomenclatura': str(r[0]),
-        'nombre': str(r[1] or ''),
-        'domicilio': str(r[2] or ''),
-        'tipo': str(r[3] or ''),
-        'barrio': str(r[4] or ''),
+        'nomenclatura': identidad['nomenclatura'],
+        'nombre': identidad['nombre'],
+        'domicilio': identidad['domicilio'],
+        'tipo': identidad['tipo'],
+        'barrio': identidad['barrio'],
         'deuda': {
-            'boletas': float(r[5] or 0),
-            'planes_pago': float(r[6] or 0),
-            'certificados': float(r[7] or 0) + float(r[10] or 0),
-            'valores': float(r[8] or 0),
-            'total': round(total, 2),
+            'boletas': reg.get('boletas', 0),
+            'planes_pago': reg.get('planes_pago', 0),
+            'certificados': reg.get('certificados', 0),
+            'valores': reg.get('valores', 0),
+            'total': reg.get('total', 0),
         },
-        'actualizado': str(r[11] or ''),
-        'fuente': tabla,
+        'actualizado': reg.get('actualizado'),
+        'fuente': reg.get('fuente'),
     }
 
 
