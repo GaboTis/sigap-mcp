@@ -34,7 +34,14 @@ _audit_lock = threading.Lock()
 
 
 def cargar_clientes() -> dict:
-    """token → {'nombre', 'scopes'} desde tokens.json (única fuente)."""
+    """token → {'nombre', 'scopes'} desde tokens.json + cliente por entorno.
+
+    Además del archivo tokens.json (única fuente en desarrollo), se acepta un
+    cliente definido por variables de entorno — imprescindible en Docker/Coolify
+    donde no se versiona el archivo:
+        API_TOKEN         token del cliente (obligatorio para habilitarlo)
+        API_TOKEN_SCOPES  scopes separados por coma (default '*')
+    """
     clientes = {}
     if _TOKENS_FILE.exists():
         try:
@@ -45,8 +52,15 @@ def cargar_clientes() -> dict:
                     clientes[token] = {'nombre': nombre, 'scopes': cfg.get('scopes', [])}
         except Exception as e:
             logger.error(f'No se pudo leer tokens.json: {e}')
+    token_env = (os.getenv('API_TOKEN') or '').strip()
+    if token_env and token_env not in clientes:
+        scopes_env = [s.strip() for s in
+                      (os.getenv('API_TOKEN_SCOPES') or '*').split(',') if s.strip()]
+        clientes[token_env] = {'nombre': 'cliente-env',
+                               'scopes': scopes_env or ['*']}
     if not clientes:
-        logger.warning('auth: no hay tokens definidos en tokens.json — la API quedará cerrada.')
+        logger.warning('auth: no hay tokens definidos (tokens.json ni API_TOKEN) — '
+                       'la API quedará cerrada.')
     return clientes
 
 
