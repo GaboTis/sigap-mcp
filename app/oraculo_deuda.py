@@ -77,6 +77,20 @@ def _es_tipo_padron(tipo, conn=None, tipos_padron=None):
     return False
 
 
+def sql_rango_ultimo_dia(tabla):
+    """Fragmento WHERE: filas del DÍA más reciente de una snapshot DWH.
+
+    Cada fila tiene su propio timestamp, así que NO sirve comparar con
+    MAX(FechaActualizacion) (solo matchea las últimas filas escritas).
+    Este rango toma todas las filas del último día (~una por nomencla)
+    sin window pesado ni memory grant.
+    """
+    return (f"FechaActualizacion >= (SELECT MAX(CONVERT(date, FechaActualizacion)) "
+            f"FROM [{tabla}] WITH (NOLOCK)) AND "
+            f"FechaActualizacion < DATEADD(day, 1, (SELECT MAX(CONVERT(date, FechaActualizacion)) "
+            f"FROM [{tabla}] WITH (NOLOCK)))")
+
+
 # ── SQL del cálculo interno (una nomencla) ─────────────────────
 
 _SQL_INTERNO = {
@@ -139,20 +153,24 @@ def deuda_interna_nomencla(conn, codigo):
 
 def deuda_padron_nomencla(conn, codigo, tabla=None):
     """Deuda del padrón DWH (fila más reciente por nomencla) + interés de
-    certificados. Devuelve None si no hay fila."""
+    certificados. Devuelve None si no hay fila.
+
+    IMPORTANTE — performance: la tabla DWH tiene millones de filas SIN índice,
+    así que NUNCA usar ROW_NUMBER() sobre toda la tabla (revienta la memoria
+    del SQL Server con RESOURCE_SEMAPHORE). TOP 1 con filtro por nomencla
+    ordenado por fecha mantiene el escaneo en streaming, sin memory grant.
+    """
     tabla = tabla or obtener_tabla_dwh(conn)
     if not tabla:
         return None
     cursor = conn.cursor()
     try:
         cursor.execute(f"""
-            SELECT TotalBoleta, TotalPlanPago, TotalCertEjec, TotalValores,
+            SELECT TOP 1 TotalBoleta, TotalPlanPago, TotalCertEjec, TotalValores,
                    TotalGral, InteresCertEjec, TotalNominal, FechaActualizacion
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY Nomencla
-                       ORDER BY FechaActualizacion DESC) rn
-                FROM [{tabla}] WITH (NOLOCK)
-            ) x WHERE rn = 1 AND Nomencla = ?
+            FROM [{tabla}] WITH (NOLOCK)
+            WHERE Nomencla = ?
+            ORDER BY FechaActualizacion DESC
         """, (codigo,))
         d = cursor.fetchone()
         if not d:

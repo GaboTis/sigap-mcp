@@ -36,12 +36,13 @@ def deuda_contribuyente(codigo):
     identidad = None
     tabla = _ultima_tabla_dwh(cur)
     if tabla:
+        # PERFORMANCE: TOP 1 por nomencla (sin ROW_NUMBER sobre toda la
+        # historia — la tabla tiene millones de filas y sin índices).
         cur.execute(f"""
-            SELECT Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente, Nombre_Barrio
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
-                FROM [{tabla}] WITH (NOLOCK)
-            ) x WHERE rn = 1 AND Nomencla = ?""", (codigo,))
+            SELECT TOP 1 Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente, Nombre_Barrio
+            FROM [{tabla}] WITH (NOLOCK)
+            WHERE Nomencla = ?
+            ORDER BY FechaActualizacion DESC""", (codigo,))
         r = cur.fetchone()
         if r:
             identidad = {'nomenclatura': str(r[0]), 'nombre': str(r[1] or ''),
@@ -154,12 +155,14 @@ def buscar_contribuyentes(q, limit=10):
     cond_nombre = ' AND '.join(['NombreRazonSocial LIKE ?'] * len(palabras)) \
         if palabras else '1=0'
     params = [like] + [f'%{p}%' for p in palabras]
+    # Rango del DÍA más reciente (cada fila tiene su propio timestamp)
     cur.execute(f"""
         SELECT TOP {limit} Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente,
                Nombre_Barrio, TotalGral + ISNULL(InteresCertEjec, 0) as Total,
                COUNT(*) OVER() as total
         FROM [{tabla}] WITH (NOLOCK)
-        WHERE FechaActualizacion = (SELECT MAX(FechaActualizacion) FROM [{tabla}] WITH (NOLOCK))
+        WHERE FechaActualizacion >= (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK))
+          AND FechaActualizacion < DATEADD(day, 1, (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK)))
           AND (Nomencla LIKE ? OR ({cond_nombre}))
         ORDER BY Total DESC""", params)
     raw = cur.fetchall()
@@ -219,12 +222,14 @@ def buscar_por_dni(dni):
         cur = conn.cursor()
         nomenclas = [x['nomenclatura'] for x in resultados]
         placeholders = ','.join('?' * len(nomenclas))
+        # PERFORMANCE: solo el día más reciente (sin ROW_NUMBER sobre la historia)
         cur.execute(f"""
-            SELECT Nomencla, TotalGral FROM (
-                SELECT Nomencla, TotalGral,
-                       ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
-                FROM [{tabla}] WITH (NOLOCK)
-            ) x WHERE rn = 1 AND Nomencla IN ({placeholders})""", nomenclas)
+            SELECT Nomencla, TotalGral
+            FROM [{tabla}] WITH (NOLOCK)
+            WHERE Nomencla IN ({placeholders})
+              AND FechaActualizacion >= (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK))
+              AND FechaActualizacion < DATEADD(day, 1, (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK)))""",
+            nomenclas)
         deudas = {str(r[0]): float(r[1] or 0) for r in cur.fetchall()}
         conn.close()
         for x in resultados:
@@ -282,23 +287,21 @@ def resumen_deuda():
         conn.close()
         return None
 
+    # PERFORMANCE: solo las filas del día más reciente (una por nomencla).
+    # Sin ROW_NUMBER sobre toda la historia (millones de filas sin índices).
     cur.execute(f"""
         SELECT COUNT(*), SUM(TotalBoleta), SUM(TotalPlanPago), SUM(TotalCertEjec),
                SUM(TotalValores), SUM(TotalGral)
-        FROM (
-            SELECT TotalBoleta, TotalPlanPago, TotalCertEjec, TotalValores, TotalGral,
-                   ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
-            FROM [{tabla}] WITH (NOLOCK)
-        ) x WHERE rn = 1""")
+        FROM [{tabla}] WITH (NOLOCK)
+        WHERE FechaActualizacion >= (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK))
+          AND FechaActualizacion < DATEADD(day, 1, (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK)))""")
     n, boletas, planes, cert, valores, total = cur.fetchone()
 
     cur.execute(f"""
         SELECT tipocontribuyente, COUNT(*), SUM(TotalGral)
-        FROM (
-            SELECT tipocontribuyente, TotalGral,
-                   ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
-            FROM [{tabla}] WITH (NOLOCK)
-        ) x WHERE rn = 1
+        FROM [{tabla}] WITH (NOLOCK)
+        WHERE FechaActualizacion >= (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK))
+          AND FechaActualizacion < DATEADD(day, 1, (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK)))
         GROUP BY tipocontribuyente ORDER BY 3 DESC""")
     por_tipo = [{'tipo': str(r[0]), 'contribuyentes': int(r[1]), 'deuda': float(r[2] or 0)}
                 for r in cur.fetchall()]

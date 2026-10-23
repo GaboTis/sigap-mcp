@@ -300,12 +300,13 @@ def colectores(anio=None):
     dwh = cur.fetchone()[0]
     cur.execute(f"""
         WITH dwh AS (
-            SELECT Nomencla, TotalGral,
-                   ROW_NUMBER() OVER (PARTITION BY Nomencla ORDER BY FechaActualizacion DESC) rn
-            FROM [{dwh}] WITH (NOLOCK))
+            SELECT Nomencla, TotalGral
+            FROM [{dwh}] WITH (NOLOCK)
+            WHERE FechaActualizacion >= (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{dwh}] WITH (NOLOCK))
+              AND FechaActualizacion < DATEADD(day, 1, (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{dwh}] WITH (NOLOCK))))
         SELECT c2.COLECTOR, COUNT(*), SUM(ISNULL(d.TotalGral, 0))
         FROM contribu c2 WITH (NOLOCK)
-        LEFT JOIN dwh d ON d.Nomencla = c2.NOMENCLA AND d.rn = 1
+        LEFT JOIN dwh d ON d.Nomencla = c2.NOMENCLA
         WHERE c2.COLECTOR <> 0 GROUP BY c2.COLECTOR""")
     deuda = {int(r[0] or 0): {'contribuyentes': int(r[1] or 0), 'deuda': float(r[2] or 0)}
              for r in cur.fetchall()}
