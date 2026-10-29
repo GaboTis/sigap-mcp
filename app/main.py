@@ -27,6 +27,7 @@ from starlette.middleware.cors import CORSMiddleware
 from app import auth
 from app.mcp_server import mcp
 from app.routes import router
+from mcp.server.transport_security import TransportSecuritySettings
 
 load_dotenv()
 
@@ -34,7 +35,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger('sigap')
 
 # El servidor MCP HTTP necesita su propio lifespan (task group interno).
-_mcp_http = mcp.streamable_http_app(streamable_http_path='/mcp')
+# Protección DNS-rebinding: por defecto solo se aceptan localhost/127.0.0.1;
+# para exponerlo con un dominio público (vía NAT/proxy) agregar el dominio en
+# MCP_ALLOWED_HOSTS (separado por comas), ej.:
+#   MCP_ALLOWED_HOSTS=api.municipioderawson.gob.ar
+_hosts_extra = [h.strip() for h in
+                (os.getenv('MCP_ALLOWED_HOSTS', '') or '').split(',') if h.strip()]
+_tsec = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=['localhost:*', '127.0.0.1:*',
+                   *[f'{h}:*' for h in _hosts_extra], *_hosts_extra],
+)
+_mcp_http = mcp.streamable_http_app(streamable_http_path='/mcp',
+                                    transport_security=_tsec)
 
 app = FastAPI(
     title='SIGAP Data API',
