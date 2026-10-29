@@ -156,15 +156,17 @@ def buscar_contribuyentes(q, limit=10):
         if palabras else '1=0'
     params = [like] + [f'%{p}%' for p in palabras]
     # Rango del DÍA más reciente (cada fila tiene su propio timestamp)
+    # Alias 'DeudaTotal' (no 'Total': la tabla DWH tiene una columna Total y
+    # el ORDER BY por el alias quedaba ambiguo → error 209).
     cur.execute(f"""
         SELECT TOP {limit} Nomencla, NombreRazonSocial, Domicilio, tipocontribuyente,
-               Nombre_Barrio, TotalGral + ISNULL(InteresCertEjec, 0) as Total,
+               Nombre_Barrio, TotalGral + ISNULL(InteresCertEjec, 0) as DeudaTotal,
                COUNT(*) OVER() as total
         FROM [{tabla}] WITH (NOLOCK)
         WHERE FechaActualizacion >= (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK))
           AND FechaActualizacion < DATEADD(day, 1, (SELECT MAX(CONVERT(date, FechaActualizacion)) FROM [{tabla}] WITH (NOLOCK)))
           AND (Nomencla LIKE ? OR ({cond_nombre}))
-        ORDER BY Total DESC""", params)
+        ORDER BY DeudaTotal DESC""", params)
     raw = cur.fetchall()
     conn.close()
 
