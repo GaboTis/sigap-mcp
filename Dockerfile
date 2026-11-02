@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bullseye
 
 # ODBC Driver 17 for SQL Server (pyodbc → SIGAP en MSSQL)
 RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg2 unixodbc unixodbc-dev && \
