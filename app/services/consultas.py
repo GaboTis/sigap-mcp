@@ -13,7 +13,7 @@ from app.db import get_conn
 logger = logging.getLogger('sigap.consultas')
 
 MAX_FILAS = 200          # máximo de filas devueltas al agente
-MAX_FILAS_EXPORT = 5000  # máximo de filas para exportar a planillas
+MAX_FILAS_EXPORT = 20000 # máximo de filas para exportar a planillas (listados grandes de expedientes)
 TIMEOUT_S = 20           # timeout de ejecución (segundos)
 CELDA_MAX = 500          # truncado de celdas de texto largas
 MAX_CONSULTAS_BATCH = 6  # máximo de consultas por llamada batch

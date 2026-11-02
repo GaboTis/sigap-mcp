@@ -163,6 +163,68 @@ def detalle_expediente(numero, ano=None, letra=None):
     return {'expediente': expediente, 'movimientos': movimientos}
 
 
+def listar_expedientes(tema=None, estado='en_curso', limite=50):
+    """Listado filtrable de expedientes.
+
+    - tema: texto libre buscado en MOTIVO (ej. 'contrat' → expedientes de
+      contrataciones; también puede ir en TEMA como LIKE).
+    - estado: 'en_curso' (default, ESTADO IN ('E','I')), 'todos', 'pagado',
+      'cerrado', 'archivo'.
+    - Orden: por ANTIGÜEDAD (FECHAINICIO ascendente); las fechas corruptas
+      (1900) van al final.
+    """
+    tema = str(tema or '').strip()
+    estado = str(estado or 'en_curso').strip().lower()
+    limite = max(1, min(int(limite or 50), 500))
+
+    where = ['e.ANULADO=0']
+    params = []
+    if tema:
+        like = f'%{tema.upper()}%'
+        where.append("(e.MOTIVO LIKE ? OR e.TEMA LIKE ?)")
+        params += [like, like]
+    estados = {
+        'en_curso': "('E','I')",
+        'todos': None,
+        'pagado': "('P')",
+        'cerrado': "('C')",
+        'archivo': "('A')",
+    }
+    if estado in estados and estados[estado]:
+        where.append(f'e.ESTADO IN {estados[estado]}')
+
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(f"""
+        SELECT TOP {limite} e.NUMERO, e.LETRA, e.ANO, e.FECHAINICIO, e.ESTADO,
+               e.SECTACTUAL, e.MOTIVO, e.TIPOEXPEDIENTE, e.INICIADOR,
+               ISNULL(ee.DESCRIPCION,'') as estado_desc,
+               ISNULL(te.DESCRIPCION,'') as tipo_desc,
+               ISNULL(sm.DESCRIPCION,'') as sector_desc,
+               COUNT(*) OVER() as total
+        FROM expediente e WITH (NOLOCK)
+        LEFT JOIN estaexpe ee WITH (NOLOCK) ON ee.CODIGO=e.ESTADO
+        LEFT JOIN tipoexpe te WITH (NOLOCK) ON te.CODIGO=e.TIPOEXPEDIENTE
+        LEFT JOIN sectmuni sm WITH (NOLOCK) ON sm.CODIGO=e.SECTACTUAL
+        WHERE {' AND '.join(where)}
+        ORDER BY CASE WHEN e.FECHAINICIO <= '1901-01-01' THEN 1 ELSE 0 END,
+                 e.FECHAINICIO ASC, e.ANO ASC""", params)
+    raw = cur.fetchall()
+    conn.close()
+
+    total = int(raw[0][12]) if raw else 0
+    resultados = [{
+        'expediente': f"{int(r[0])}{'-' + str(r[1]) if r[1] else ''}/{int(r[2])}",
+        'numero': int(r[0]), 'letra': str(r[1] or ''), 'ano': int(r[2]),
+        'fecha_inicio': r[3].strftime('%d/%m/%Y') if r[3] and r[3].year > 1900 else None,
+        'estado': str(r[4] or ''), 'estado_desc': str(r[9] or ''),
+        'sector_actual': str(r[10] or ''), 'motivo': str(r[6] or ''),
+        'tipo': str(r[11] or ''), 'iniciador': str(r[8] or ''),
+    } for r in raw]
+    return {'total': total, 'limite': limite, 'resultados': resultados,
+            'filtros': {'tema': tema or None, 'estado': estado}}
+
+
 def analitica_expedientes():
     """KPIs de gestión: cantidades, tiempos y carga por sector (para mejora de procesos)."""
     conn = get_conn()
