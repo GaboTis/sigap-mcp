@@ -5,7 +5,8 @@ Seguridad: cada ruta exige token con el scope correspondiente (ver app/auth.py).
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.auth import requiere_scope
-from app.services import consultas, contribuyentes, expedientes, panel, recaudacion
+from app.services import (consultas, contribuyentes, esquema, expedientes,
+                          panel, personas, recaudacion)
 
 router = APIRouter()
 
@@ -13,6 +14,18 @@ router = APIRouter()
 @router.get('/api/health')
 def health():
     return {'status': 'ok', 'servicio': 'sigap-mcp', 'modo': 'solo lectura'}
+
+
+@router.get('/api/esquema/buscar', dependencies=[Depends(requiere_scope('consultas.read'))])
+def api_esquema_buscar(q: str = Query('', max_length=80)):
+    """Diccionario de datos: busca tablas por nombre, dominio o sinónimos."""
+    return esquema.buscar_esquema(q)
+
+
+@router.get('/api/esquema/tabla', dependencies=[Depends(requiere_scope('consultas.read'))])
+def api_esquema_tabla(tabla: str = Query(..., max_length=60)):
+    """Diccionario + columnas reales + muestra de una tabla."""
+    return esquema.esquema_tabla(tabla)
 
 
 @router.get('/api/expedientes/buscar', dependencies=[Depends(requiere_scope('expedientes.read'))])
@@ -26,6 +39,14 @@ def api_detalle_expediente(numero: int, ano: int = None, letra: str = None):
     if det is None:
         raise HTTPException(status_code=404, detail='Expediente no encontrado')
     return det
+
+
+@router.get('/api/expedientes/listar', dependencies=[Depends(requiere_scope('expedientes.read'))])
+def api_listar_expedientes(tema: str = Query('', max_length=80),
+                           estado: str = Query('en_curso', max_length=20),
+                           limite: int = Query(50, ge=1, le=500)):
+    """Listado filtrable de expedientes (por tema y estado, ordenado por antigüedad)."""
+    return expedientes.listar_expedientes(tema=tema, estado=estado, limite=limite)
 
 
 @router.get('/api/expedientes/analitica', dependencies=[Depends(requiere_scope('expedientes.analitica'))])
@@ -61,6 +82,13 @@ def api_deuda_contribuyente(codigo: str):
 @router.get('/api/contribuyentes/buscar', dependencies=[Depends(requiere_scope('contribuyentes.buscar'))])
 def api_buscar_contribuyentes(q: str, limit: int = Query(10, ge=1, le=50)):
     return contribuyentes.buscar_contribuyentes(q, limit)
+
+
+@router.get('/api/personas/buscar', dependencies=[Depends(requiere_scope('contribuyentes.buscar'))])
+def api_buscar_persona(apellido: str = Query(..., max_length=60),
+                       nombre: str = Query(None, max_length=60)):
+    """Cazador de apellidos: todas las variantes de escritura en toda la base."""
+    return personas.buscar_persona(apellido, nombre)
 
 
 @router.get('/api/recaudacion', dependencies=[Depends(requiere_scope('recaudacion'))])

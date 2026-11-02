@@ -20,6 +20,7 @@ from app.services import consultas as svc_consultas
 from app.services import contribuyentes as svc_contribuyentes
 from app.services import expedientes as svc_expedientes
 from app.services import panel as svc_panel
+from app.services import personas as svc_personas
 from app.services import recaudacion as svc_recaudacion
 
 mcp = MCPServer(
@@ -68,6 +69,19 @@ def deuda_contribuyente(codigo: str) -> dict:
                       "nombre/razón social. Devuelve los de mayor deuda primero.")
 def buscar_contribuyente(q: str, limit: int = 10) -> dict:
     return svc_contribuyentes.buscar_contribuyentes(q, limit)
+
+
+@mcp.tool(description="CAZADOR DE APELLIDOS: busca una persona en TODA la base con todas "
+                      "las variantes de escritura plausibles del apellido (QU↔CU, dobles "
+                      "letras, compuestos con espacio). Busca en: padrón de contribuyentes, "
+                      "responsables de sectores, usuarios del sistema, menciones en motivos "
+                      "de expedientes y en observaciones de movimientos. Usarlo SIEMPRE que "
+                      "pidan buscar una persona o un apellido, aunque parezca bien escrito: "
+                      "los datos se cargaron a mano con faltas (ej. QUATTROPANI aparece como "
+                      "QUATROPANI, JULIO QUATTROPANI o JULIO ELÍAS QUATTROPANI). Parámetros: "
+                      "apellido (obligatorio) y nombre opcional para filtrar.")
+def buscar_persona(apellido: str, nombre: str = None) -> dict:
+    return svc_personas.buscar_persona(apellido, nombre)
 
 
 @mcp.tool(description="Resumen de recaudación: hoy, mes actual y año, con comparativa "
@@ -141,6 +155,23 @@ def listar_tablas(filtro: str = '') -> dict:
                       "para poder armar una consulta SQL correcta.")
 def columnas_tabla(tabla: str) -> dict:
     return svc_consultas.columnas_tabla(tabla)
+
+
+@mcp.tool(description="DICCIONARIO DE DATOS: busca las tablas de SIGAP por nombre, dominio "
+                      "o sinónimos de negocio (ej. 'gastos', 'pagos a proveedores', 'cobros'). "
+                      "Devuelve QUÉ ES cada tabla, sus columnas clave y un ejemplo de consulta. "
+                      "Usar SIEMPRE primero ante una pregunta de datos para ubicar la tabla correcta.")
+def buscar_esquema(q: str = '') -> dict:
+    from app.services import esquema
+    return esquema.buscar_esquema(q)
+
+
+@mcp.tool(description="DICCIONARIO DE DATOS: detalle de UNA tabla (qué es, columnas clave) "
+                      "más sus columnas reales y una muestra de 2 filas. Útil para confirmar "
+                      "nombres de columnas antes de armar el SQL.")
+def esquema_tabla(tabla: str) -> dict:
+    from app.services import esquema
+    return esquema.esquema_tabla(tabla)
 
 
 @mcp.tool(description="Ejecuta una consulta SQL de SOLO LECTURA generada por el agente "
